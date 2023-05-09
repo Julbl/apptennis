@@ -2,6 +2,7 @@ import sqlite3
 from tkinter import *
 import tkinter as tk
 from tkinter import ttk
+from PIL import Image, ImageTk
 
 # создание базы данных
 conn = sqlite3.connect('players.db')
@@ -22,6 +23,16 @@ conn.commit()
 root = Tk()
 root.title("Игроки и матчи")
 
+img = Image.open("background.jpg")
+img = img.resize((root.winfo_screenwidth(), root.winfo_screenheight()))
+img = ImageTk.PhotoImage(img)
+
+# создание фона
+bg_label = Label(root, image=img)
+bg_label.place(x=0, y=0)
+
+# задание прозрачности фона
+bg_label.configure(bg='gray50')
 
 # функция для добавления нового игрока
 def add_player():
@@ -31,29 +42,51 @@ def add_player():
     fio_entry.delete(0, END)
 
 
-# функция для вывода списка всех игроков
+# функция для удаления игрока из базы данных и таблицы
+def delete_player(tree):
+    selected_item = tree.focus()
+    if selected_item:
+        player_id = tree.item(selected_item)['values'][0]
+        conn = sqlite3.connect('players.db')
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM players WHERE id=?", (player_id,))
+        conn.commit()
+        conn.close()
+        # Обновить таблицу, чтобы она отображала актуальные данные
+        update_players_table(tree)
+
+# функция для вывода списка всех игроков в таблицу
+def update_players_table(tree):
+    # очищаем таблицу от старых данных
+    tree.delete(*tree.get_children())
+
+    # Заполняем таблицу из базы данных
+    conn = sqlite3.connect('players.db')
+    c = conn.cursor()
+    c.execute("SELECT * FROM players")
+    data = c.fetchall()
+    # добавляем данные в таблицу
+    for player in data:
+        tree.insert('', 'end', values=(player[0], player[1], 'Удалить'), tags=('player',))
+
+    # Назначить функцию удаления записи на кнопку в каждой строке таблицы
+    tree.tag_bind('player', '<Button-1>', lambda event: delete_player(tree))
+
 # функция для вывода списка всех игроков
 def show_players():
     # создание нового окна
     players_window = Toplevel(root)
     players_window.title("Список игроков")
 
-    # создание виджета Listbox
-    players_listbox = Listbox(players_window, width=50)
-    players_listbox.pack(padx=10, pady=10)
+    tree = ttk.Treeview(players_window, columns=('ID Players', 'FIO', 'Delete'))
+    tree.heading('#0', text='ID участника')
+    tree.heading('#1', text='ФИО')
+    tree.heading('#2', text='Удалить')
 
-    # получение списка игроков из базы данных и добавление их в Listbox
-    players = cursor.execute('''SELECT * FROM players''').fetchall()
-    for player in players:
-        players_listbox.insert(END, f"ID:{player[0]} - {player[1]}")
+    # заполнение таблицы
+    update_players_table(tree)
 
-
-# функция для удаления игрока по id
-def delete_player():
-    player_id = id_entry.get()
-    cursor.execute('''DELETE FROM players WHERE id = ?''', (player_id,))
-    conn.commit()
-    id_entry.delete(0, END)
+    tree.pack()
 
 
 # функция для добавления результата матча
@@ -72,13 +105,17 @@ def add_match():
 def delete_match(tree):
     selected_item = tree.focus()
     if selected_item:
-        tree.delete(selected_item)
         match_number = tree.item(selected_item)['values'][0]
         conn = sqlite3.connect('players.db')
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM matches WHERE match_number=?", (match_number,))
+        cursor.execute("DELETE FROM matches WHERE id=?", (match_number,))
         conn.commit()
         conn.close()
+        # очистить виджет tree от старых данных
+        for item in tree.get_children():
+            tree.delete(item)
+        # обновить таблицу, чтобы она отображала актуальные данные
+        view_matches()
 
 
 # Функция для отображения таблицы с историей матчей
@@ -88,10 +125,11 @@ def view_matches():
     match_window.title("История матчей")
 
     # Создать таблицу
-    tree = ttk.Treeview(match_window, columns=('Match ID', 'Player 1', 'Player 2', 'Result', 'Delete'))
+    tree = ttk.Treeview(match_window, columns=(
+        'Match ID', 'Player 1', 'Player 2', 'Result', 'Delete'))
     tree.heading('#0', text='Номер матча')
-    tree.heading('#1', text='ID первого участника')
-    tree.heading('#2', text='ID второго участника')
+    tree.heading('#1', text='Игрок 1')
+    tree.heading('#2', text='Игрок 2')
     tree.heading('#3', text='Результат матча')
     tree.heading('#4', text='Удалить')
 
@@ -108,10 +146,16 @@ def view_matches():
             result = 'Победа второго'
         else:
             result = 'Ничья'
+            # Получить ФИО игроков по их ID
+        #c.execute("SELECT name FROM players WHERE id=?", (match[1],))
+        #player1 = c.fetchone()[0]
+        #c.execute("SELECT name FROM players WHERE id=?", (match[2],))
+        #player2 = c.fetchone()[0]
+
         tree.insert('', 'end', values=(match[0], match[1], match[2], result, 'Удалить'), tags=('match',))
 
     # Назначить функцию удаления записи на кнопку в каждой строке таблицы
-    tree.tag_bind('match', '<Button-1>', lambda event: delete_match())
+    tree.tag_bind('match', '<Button-1>', lambda event: delete_match(tree))
 
     tree.pack()
 
@@ -130,12 +174,7 @@ show_frame = LabelFrame(root, text="Список игроков")
 show_frame.pack(padx=10, pady=10)
 show_button = Button(show_frame, text="Показать список игроков", command=show_players)
 show_button.pack(padx=5, pady=5)
-id_label = Label(show_frame, text="ID:")
-id_label.pack(padx=5, pady=5)
-id_entry = Entry(show_frame)
-id_entry.pack(padx=5, pady=5)
-delete_button = Button(show_frame, text="Удалить игрока", command=delete_player)
-delete_button.pack(padx=5, pady=5)
+
 
 match_frame = LabelFrame(root, text="Новый матч")
 match_frame.pack(padx=10, pady=10)
